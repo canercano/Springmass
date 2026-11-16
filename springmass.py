@@ -1,62 +1,52 @@
 """Helpers for reading and reducing the mass-spring position-vs-time data.
 
-The data files are exported from the motion sensor software. Each one has a
-few title/date lines (the number varies between files), then a tab-separated
-header line starting with "Time (s)", then the data columns:
+Each data file has a few title/date lines (2 or 3, it varies), then a
+header line starting with "Time (s)", then three tab-separated columns:
 
     Time (s)    Distance (cm)    Dist Error (cm)
 """
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 
 
-def read_run(path):
-    """Read one positionvssample.txt file into a DataFrame.
+def count_header_lines(path):
+    """Number of lines up to and including the 'Time (s)' column-header line."""
+    with open(path) as f:
+        for i, line in enumerate(f):
+            if line.startswith("Time"):
+                return i + 1
+    raise ValueError(f"No 'Time' header line found in {path}")
 
-    Columns are renamed to: time_s, dist_cm, dist_err_cm.
-    """
-    path = Path(path)
-    lines = path.read_text().splitlines()
-    # Find the column-header line, since the number of title lines varies.
-    header_row = next(i for i, line in enumerate(lines) if line.startswith("Time"))
-    df = pd.read_csv(path, sep="\t", skiprows=header_row)
-    df.columns = ["time_s", "dist_cm", "dist_err_cm"]
-    return df
+
+def read_run(path):
+    """Read one file with np.loadtxt. Returns (time_s, dist_cm, dist_err_cm) arrays."""
+    time, dist, dist_err = np.loadtxt(
+        path, delimiter="\t", skiprows=count_header_lines(path), unpack=True
+    )
+    return time, dist, dist_err
 
 
 def load_all(folder="equilibrium"):
-    """Read every sample folder under data/<folder>/ into a dict {name: DataFrame}."""
+    """Read every sample under data/<folder>/ into {name: {"time", "dist", "dist_err"}}."""
     runs = {}
     for f in sorted((DATA_DIR / folder).glob("*/positionvssample.txt")):
-        runs[f.parent.name] = read_run(f)
+        time, dist, dist_err = read_run(f)
+        runs[f.parent.name] = {"time": time, "dist": dist, "dist_err": dist_err}
     return runs
 
 
-def average_run(df):
-    """Average one run and propagate the error in quadrature.
+def equilibrium(dist, dist_err):
+    """Mean equilibrium position and its uncertainty.
 
-    mean  = mean of the distance readings
     std   = sample standard deviation of the readings (ddof=1)
     err   = mean of the per-point sensor error
-    total = sqrt(std**2 + err**2)
+    sigma = sqrt(std**2 + err**2)
     """
-    mean = df["dist_cm"].mean()
-    std = df["dist_cm"].std(ddof=1)
-    err_mean = df["dist_err_cm"].mean()
-    total = np.sqrt(std**2 + err_mean**2)
-    return {
-        "n": len(df),
-        "mean_cm": mean,
-        "std_cm": std,
-        "err_mean_cm": err_mean,
-        "total_err_cm": total,
-    }
-
-
-def summarize(runs):
-    """Return a summary table with one row per sample."""
-    return pd.DataFrame({name: average_run(df) for name, df in runs.items()}).T
+    mean = np.mean(dist)
+    std = np.std(dist, ddof=1)
+    err_mean = np.mean(dist_err)
+    sigma = np.sqrt(std**2 + err_mean**2)
+    return mean, std, err_mean, sigma
