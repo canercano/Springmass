@@ -1,3 +1,0 @@
-r1: 100 mass
-vane 1: radius 5cm
-extension1 (vane2): radius 2.5cm
